@@ -16,7 +16,8 @@ def _get_credentials_interactively(flow, storage, get_code_callback):
     """Return the credentials asking the user."""
     flow.redirect_uri = oauth2client.client.OOB_CALLBACK_URN
     authorize_url = flow.step1_get_authorize_url()
-    code = get_code_callback(authorize_url)
+    from youtube_upload.auth import console
+	code = console.get_code(authorize_url)
     if code:
         credential = flow.step2_exchange(code, http=None)
         storage.put(credential)
