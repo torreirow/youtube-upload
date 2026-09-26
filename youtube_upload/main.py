@@ -198,8 +198,15 @@ def parse_options_error(parser, options, args):
         parser.print_usage()
         msg = "Some required option are missing: {0}".format(", ".join(missing))
         raise OptionsError(msg)
-    if options.captions and not os.path.isfile(options.captions):
-        raise OptionsError("Captions file not found: {0}".format(options.captions))
+    languages = {}
+    for path in options.captions or []:
+        if not os.path.isfile(path):
+            raise OptionsError("Captions file not found: {0}".format(path))
+        lang = captions.get_language(path, options.captions_lang)
+        if lang in languages:
+            msg = "Captions files {0} and {1} have the same language: {2}"
+            raise OptionsError(msg.format(languages[lang], path, lang))
+        languages[lang] = path
 
 
 def update_video(youtube, options, video_id):
@@ -209,14 +216,18 @@ def update_video(youtube, options, video_id):
     if options.playlist:
         playlists.add_video_to_playlist(youtube, video_id,
                                         title=lib.to_utf8(options.playlist), privacy=options.privacy)
-    if options.captions:
+    failed = []
+    for path in options.captions or []:
+        lang = captions.get_language(path, options.captions_lang)
         try:
-            captions.add_captions(youtube, video_id, options.captions,
-                                  options.captions_lang)
+            captions.add_captions(youtube, video_id, path, lang)
         except googleapiclient.errors.HttpError as error:
             response = bytes.decode(error.content, encoding=lib.get_encoding()).strip()
-            raise CaptionsError(
-                u"Adding captions to video {0} failed: {1}".format(video_id, response))
+            debug(u"Adding captions {0} failed: {1}".format(path, response))
+            failed.append(path)
+    if failed:
+        raise CaptionsError(u"Adding captions to video {0} failed: {1}".format(
+            video_id, ", ".join(failed)))
 
 
 def run_main(parser, options, args, output=sys.stdout):
@@ -284,13 +295,15 @@ def main(arguments):
     parser.add_option('', '--playlist', dest='playlist', type="string",
                       help='Playlist title (if it does not exist, it will be created)')
     parser.add_option('', '--captions', dest='captions', type="string", metavar="FILE",
-                      help='Captions file to add to the video (e.g. SRT)')
+                      action="append",
+                      help='Captions file to add to the video (e.g. name.nl.srt). '
+                           'Can be repeated; the language is taken from the filename')
     parser.add_option('', '--video-id', dest='video_id', type="string", metavar="ID",
                       help='Existing video to update instead of uploading '
                            '(with --captions, --thumbnail or --playlist)')
     parser.add_option('', '--captions-lang', dest='captions_lang', type="string",
                       default="nl", metavar="CODE",
-                      help='Language of the captions file (default: nl)')
+                      help='Captions language when the filename has none (default: nl)')
     parser.add_option('', '--title-template', dest='title_template',
                       type="string", default="{title} [{n}/{total}]", metavar="string",
                       help='Template for multiple videos (default: {title} [{n}/{total}])')
