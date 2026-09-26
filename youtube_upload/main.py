@@ -32,6 +32,7 @@ from . import upload_video
 from . import categories
 from . import lib
 from . import playlists
+from . import captions
 
 # http://code.google.com/p/python-progressbar (>= 2.3)
 try:
@@ -52,6 +53,9 @@ class AuthenticationError(Exception): pass
 class RequestError(Exception): pass
 
 
+class CaptionsError(Exception): pass
+
+
 EXIT_CODES = {
     OptionsError: 2,
     InvalidCategory: 3,
@@ -59,6 +63,7 @@ EXIT_CODES = {
     AuthenticationError: 4,
     oauth2client.client.FlowExchangeError: 4,
     NotImplementedError: 5,
+    CaptionsError: 6,
 }
 
 WATCH_VIDEO_URL = "https://www.youtube.com/watch?v={id}"
@@ -180,22 +185,50 @@ def get_youtube_handler(options):
                              get_code_callback=get_code_callback)
 
 
-def parse_options_error(parser, options):
+def parse_options_error(parser, options, args):
     """Check errors in options."""
-    required_options = ["title"]
+    if options.video_id:
+        if args:
+            raise OptionsError("--video-id cannot be combined with video files")
+        if not (options.captions or options.thumb or options.playlist):
+            raise OptionsError("--video-id requires --captions, --thumbnail or --playlist")
+    required_options = [] if options.video_id else ["title"]
     missing = [opt for opt in required_options if not getattr(options, opt)]
     if missing:
         parser.print_usage()
         msg = "Some required option are missing: {0}".format(", ".join(missing))
         raise OptionsError(msg)
+    if options.captions and not os.path.isfile(options.captions):
+        raise OptionsError("Captions file not found: {0}".format(options.captions))
+
+
+def update_video(youtube, options, video_id):
+    """Set thumbnail, playlist and captions of a video."""
+    if options.thumb:
+        youtube.thumbnails().set(videoId=video_id, media_body=options.thumb).execute()
+    if options.playlist:
+        playlists.add_video_to_playlist(youtube, video_id,
+                                        title=lib.to_utf8(options.playlist), privacy=options.privacy)
+    if options.captions:
+        try:
+            captions.add_captions(youtube, video_id, options.captions,
+                                  options.captions_lang)
+        except googleapiclient.errors.HttpError as error:
+            response = bytes.decode(error.content, encoding=lib.get_encoding()).strip()
+            raise CaptionsError(
+                u"Adding captions to video {0} failed: {1}".format(video_id, response))
 
 
 def run_main(parser, options, args, output=sys.stdout):
     """Run the main scripts from the parsed options/args."""
-    parse_options_error(parser, options)
+    parse_options_error(parser, options, args)
     youtube = get_youtube_handler(options)
 
     if youtube:
+        if options.video_id:
+            debug("Using existing video: {0}".format(options.video_id))
+            update_video(youtube, options, options.video_id)
+            output.write(options.video_id + "\n")
         for index, video_path in enumerate(args):
             video_id = upload_youtube_video(youtube, options, video_path, len(args), index)
             video_url = WATCH_VIDEO_URL.format(id=video_id)
@@ -203,11 +236,7 @@ def run_main(parser, options, args, output=sys.stdout):
             if options.open_link:
                 open_link(video_url)  # Opens the Youtube Video's link in a webbrowser
 
-            if options.thumb:
-                youtube.thumbnails().set(videoId=video_id, media_body=options.thumb).execute()
-            if options.playlist:
-                playlists.add_video_to_playlist(youtube, video_id,
-                                                title=lib.to_utf8(options.playlist), privacy=options.privacy)
+            update_video(youtube, options, video_id)
             output.write(video_id + "\n")
     else:
         raise AuthenticationError("Cannot get youtube resource")
@@ -216,8 +245,9 @@ def run_main(parser, options, args, output=sys.stdout):
 def main(arguments):
     """Upload videos to Youtube."""
     usage = """Usage: %prog [OPTIONS] VIDEO [VIDEO2 ...]
+       %prog [OPTIONS] --video-id=ID
 
-    Upload videos to Youtube."""
+    Upload videos to Youtube, or update an existing video."""
     parser = optparse.OptionParser(usage)
 
     # Video metadata
@@ -253,6 +283,14 @@ def main(arguments):
                       help='Image file to use as video thumbnail (JPEG or PNG)')
     parser.add_option('', '--playlist', dest='playlist', type="string",
                       help='Playlist title (if it does not exist, it will be created)')
+    parser.add_option('', '--captions', dest='captions', type="string", metavar="FILE",
+                      help='Captions file to add to the video (e.g. SRT)')
+    parser.add_option('', '--video-id', dest='video_id', type="string", metavar="ID",
+                      help='Existing video to update instead of uploading '
+                           '(with --captions, --thumbnail or --playlist)')
+    parser.add_option('', '--captions-lang', dest='captions_lang', type="string",
+                      default="nl", metavar="CODE",
+                      help='Language of the captions file (default: nl)')
     parser.add_option('', '--title-template', dest='title_template',
                       type="string", default="{title} [{n}/{total}]", metavar="string",
                       help='Template for multiple videos (default: {title} [{n}/{total}])')
