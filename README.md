@@ -50,6 +50,8 @@ The package used to include a default ```client_secrets.json``` file. It does no
 
 *Note: ```client_secrets.json``` is a file you can download from the developer console, the credentials file is something auto generated after the first time the script is run and the google account sign in is followed, the file is stored at ```~/.youtube-upload-credentials.json```.*
 
+*Note: captions require the `youtube.force-ssl` scope, which older versions did not request. If adding captions fails with `insufficientPermissions`, remove ```~/.youtube-upload-credentials.json``` (or your `--credentials-file`) and authenticate again. If your OAuth consent screen lists its scopes, add `https://www.googleapis.com/auth/youtube.force-ssl` there too.*
+
 Examples
 ========
 
@@ -85,6 +87,26 @@ tx2Zb-145Yz
  --location (latitude=VAL,longitude=VAL[,altitude=VAL])  
  --thumbnail (string)  
  ```
+
+* Upload a video with captions (subtitles). Repeat `--captions` to add several languages. The language is taken from the filename (`name.nl.srt` -> `nl`, `name.pt-BR.srt` -> `pt-BR`); files without a language code use `--captions-lang` (default: `nl`):
+
+```
+$ youtube-upload \
+  --title="A.S. Mutter" \
+  --captions=anne_sophie_mutter.nl.srt \
+  --captions=anne_sophie_mutter.en.srt \
+  anne_sophie_mutter.flv
+```
+
+All captions files are checked before the upload starts: a missing file, or two files with the same language, stops the script with exit code 2. If adding a captions track fails, the other tracks are still added and the script exits with code 6, reporting the video ID.
+
+* Add captions, a thumbnail or a playlist to an existing video, without uploading (`--title` is not needed):
+
+```
+$ youtube-upload --video-id=pxzZ-fYjeYs --captions=anne_sophie_mutter.en.srt
+```
+
+Note that `--playlist` adds the video again, even if it is already in that playlist.
 
 * Upload a video using a browser GUI to authenticate:
 
